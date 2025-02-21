@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Catomania</title>
+    <style>
+        canvas { border: 1px solid white; background: #000000; }
+        body { display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; font-family: monospace; background: #000000; }
+    </style>
+</head>
+<body>
+    <canvas id="gameCanvas" width="400" height="600"></canvas>
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+
+        // Load assets
+        const catImg = new Image();
+        catImg.src = 'cat.png';
+        const birdImg = new Image();
+        birdImg.src = 'bird.png';
+        const titleImg = new Image();
+        titleImg.src = 'title.png';
+        const gameOverImg = new Image();
+        gameOverImg.src = 'gameover.png';
+        const heartImg = new Image();
+        heartImg.src = 'heart.png';
+        const catchSound = new Audio('catch.wav');
+        const meowSound = new Audio('meow.wav');
+        const heartSound = new Audio('heart.wav'); // New sound for losing a heart
+
+        // Game variables
+        let cat = { x: 150, speed: 5, width: 100, height: 100 };
+        let birds = [];
+        let score = 0;
+        let lives = 3;
+        let gameOver = false;
+        let gameWon = false;
+        let gameStarted = false;
+        let paused = false; // New pause state
+        const birdSpeed = 5;
+        const minBirds = 2;
+        const maxBirds = 5;
+
+        // Input handling
+        let keys = { left: false, right: false };
+        document.addEventListener('keydown', (e) => {
+            if (!gameStarted && e.key !== ' ') {
+                gameStarted = true;
+                spawnBirds();
+            }
+            if (e.key === 'ArrowLeft') keys.left = true;
+            if (e.key === 'ArrowRight') keys.right = true;
+            if (e.key === 'r' && (gameOver || gameWon)) resetGame();
+            if (e.key === ' ' && gameStarted && !gameOver && !gameWon) { // Space to toggle pause
+                paused = !paused;
+            }
+        });
+        document.addEventListener('keyup', (e) => {
+            if (e.key === 'ArrowLeft') keys.left = false;
+            if (e.key === 'ArrowRight') keys.right = false;
+        });
+
+        // Spawn birds with controlled spacing
+        function spawnBirds() {
+            birds = [];
+            const birdCount = Math.floor(Math.random() * (maxBirds - minBirds + 1)) + minBirds;
+            const spacing = canvas.width / (birdCount + 1);
+            for (let i = 0; i < birdCount; i++) {
+                birds.push({
+                    x: spacing * (i + 1) - 30,
+                    y: -60 - (i * 100),
+                    speed: birdSpeed,
+                    width: 60,
+                    height: 60
+                });
+            }
+        }
+
+        // Game logic
+        function update() {
+            if (!gameStarted || gameOver || gameWon || paused) return;
+
+            // Move cat
+            if (keys.left && cat.x > 0) cat.x -= cat.speed;
+            if (keys.right && cat.x < canvas.width - cat.width) cat.x += cat.speed;
+
+            // Move and check birds
+            for (let i = birds.length - 1; i >= 0; i--) {
+                birds[i].y += birds[i].speed;
+                if (birds[i].y > canvas.height) {
+                    lives--;
+                    heartSound.play().catch(() => console.log("heart.wav failed")); // Play heart sound
+                    birds.splice(i, 1);
+                    birds.push({
+                        x: Math.random() * (canvas.width - 60),
+                        y: -60,
+                        speed: birdSpeed,
+                        width: 60,
+                        height: 60
+                    });
+                    if (lives <= 0) gameOver = true;
+                    continue;
+                }
+
+                // Collision detection
+                if (birds[i].y + birds[i].height > canvas.height - cat.height &&
+                    birds[i].x < cat.x + cat.width &&
+                    birds[i].x + birds[i].width > cat.x) {
+                    score++;
+                    catchSound.play().catch(() => console.log("catch.wav failed"));
+                    if (score % 10 === 0) meowSound.play().catch(() => console.log("meow.wav failed"));
+                    birds.splice(i, 1);
+                    birds.push({
+                        x: Math.random() * (canvas.width - 60),
+                        y: -60,
+                        speed: birdSpeed,
+                        width: 60,
+                        height: 60
+                    });
+                    if (score >= 100) gameWon = true;
+                }
+            }
+        }
+
+        function draw() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            if (!gameStarted) {
+                // Title screen
+                if (titleImg.complete && titleImg.naturalWidth !== 0) {
+                    ctx.drawImage(titleImg, 50, canvas.height / 2 - 50, 300, 100);
+                } else {
+                    ctx.fillStyle = 'white';
+                    ctx.font = '40px monospace';
+                    ctx.fillText('Catomania', 80, canvas.height / 2 - 20);
+                }
+                ctx.fillStyle = 'white';
+                ctx.font = '20px monospace';
+                ctx.fillText('Press any key to start', 80, canvas.height / 2 + 100);
+                return;
+            }
+
+            // Draw cat
+            if (catImg.complete && catImg.naturalWidth !== 0) {
+                ctx.drawImage(catImg, cat.x, canvas.height - cat.height, cat.width, cat.height);
+            } else {
+                ctx.fillStyle = 'gray';
+                ctx.fillRect(cat.x, canvas.height - cat.height, cat.width, cat.height);
+            }
+
+            // Draw birds
+            if (!gameOver && !gameWon) {
+                birds.forEach(bird => {
+                    if (birdImg.complete && birdImg.naturalWidth !== 0) {
+                        ctx.drawImage(birdImg, bird.x, bird.y, bird.width, bird.height);
+                    } else {
+                        ctx.fillStyle = 'yellow';
+                        ctx.fillRect(bird.x, bird.y, bird.width, bird.height);
+                    }
+                });
+            }
+
+            // Draw score
+            ctx.fillStyle = 'white';
+            ctx.font = '20px monospace';
+            ctx.fillText(`Score: ${score}`, 10, 40);
+
+            // Draw hearts
+            for (let i = 0; i < lives; i++) {
+                if (heartImg.complete && heartImg.naturalWidth !== 0) {
+                    ctx.drawImage(heartImg, canvas.width - 40 - (i * 40), 10, 30, 30);
+                } else {
+                    ctx.fillStyle = 'red';
+                    ctx.fillRect(canvas.width - 40 - (i * 40), 10, 30, 30);
+                }
+            }
+
+            // Pause screen
+            if (paused) {
+                ctx.fillStyle = 'white';
+                ctx.font = '40px monospace';
+                ctx.fillText('Paused', 130, canvas.height / 2);
+                ctx.font = '20px monospace';
+                ctx.fillText('Press Space to Resume', 90, canvas.height / 2 + 40);
+                return;
+            }
+
+            // Game over or win
+            if (gameOver) {
+                if (gameOverImg.complete && gameOverImg.naturalWidth !== 0) {
+                    ctx.drawImage(gameOverImg, 50, canvas.height / 2 - 50, 300, 100);
+                } else {
+                    ctx.fillStyle = 'red';
+                    ctx.font = '40px monospace';
+                    ctx.fillText('Game Over', 80, canvas.height / 2 - 20);
+                }
+                ctx.fillStyle = 'white';
+                ctx.font = '20px monospace';
+                ctx.fillText('Press R to Restart', 120, canvas.height / 2 + 100);
+            } else if (gameWon) {
+                ctx.fillStyle = 'green';
+                ctx.font = '40px monospace';
+                ctx.fillText('You Win!', 110, canvas.height / 2 - 20);
+                ctx.font = '20px monospace';
+                ctx.fillText('Press R to Restart', 120, canvas.height / 2 + 20);
+            }
+        }
+
+        function resetGame() {
+            cat.x = 150;
+            score = 0;
+            lives = 3;
+            gameOver = false;
+            gameWon = false;
+            gameStarted = true;
+            paused = false; // Reset pause state
+            spawnBirds();
+        }
+
+        // Game loop
+        function gameLoop() {
+            update();
+            draw();
+            requestAnimationFrame(gameLoop);
+        }
+
+        // Start game immediately
+        gameLoop();
+    </script>
+</body>
+</html>

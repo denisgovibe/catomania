@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Catomania</title>
+    <style>
+        canvas { border: 1px solid white; background: #000000; }
+        body { display: flex; justify-content; center; align-items: center; height: 100vh; margin: 0; font-family: monospace; background: #000000; }
+    </style>
+</head>
+<body>
+    <canvas id="gameCanvas" width="400" height="600"></canvas>
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+
+        // Load assets
+        const catImg = new Image();
+        catImg.src = 'cat.png';
+        const birdImg = new Image();
+        birdImg.src = 'bird.png';
+        const catchSound = new Audio('catch.wav');
+        const meowSound = new Audio('meow.wav');
+
+        // Game variables
+        let cat = { x: 150, speed: 5, width: 100, height: 100 };
+        let bird = { x: Math.random() * (canvas.width - 60), y: -60, speed: 3, width: 60, height: 60 };
+        let score = 0;
+        let gameOver = false;
+        let gameWon = false;
+
+        // Input handling
+        let keys = { left: false, right: false };
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'ArrowLeft') keys.left = true;
+            if (e.key === 'ArrowRight') keys.right = true;
+            if (e.key === 'r' && (gameOver || gameWon)) resetGame();
+        });
+        document.addEventListener('keyup', (e) => {
+            if (e.key === 'ArrowLeft') keys.left = false;
+            if (e.key === 'ArrowRight') keys.right = false;
+        });
+
+        // Game logic
+        function update() {
+            if (gameOver || gameWon) return;
+
+            // Move cat
+            if (keys.left && cat.x > 0) cat.x -= cat.speed;
+            if (keys.right && cat.x < canvas.width - cat.width) cat.x += cat.speed;
+
+            // Move bird
+            bird.y += bird.speed;
+            if (bird.y > canvas.height) {
+                gameOver = true;
+                return;
+            }
+
+            // Collision detection
+            if (bird.y + bird.height > canvas.height - cat.height &&
+                bird.x < cat.x + cat.width &&
+                bird.x + bird.width > cat.x) {
+                score++;
+                catchSound.play();
+                if (score % 10 === 0) meowSound.play();
+                bird.x = Math.random() * (canvas.width - bird.width);
+                bird.y = -bird.height;
+                if (score >= 100) gameWon = true;
+            }
+        }
+
+        function draw() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            // Draw cat
+            ctx.drawImage(catImg, cat.x, canvas.height - cat.height, cat.width, cat.height);
+
+            // Draw bird
+            if (!gameOver && !gameWon) ctx.drawImage(birdImg, bird.x, bird.y, bird.width, bird.height);
+
+            // Draw score
+            ctx.fillStyle = 'white';
+            ctx.font = '20px monospace';
+            ctx.fillText(`Score: ${score}`, 10, 30);
+
+            // Game over or win
+            if (gameOver) {
+                ctx.fillStyle = 'red';
+                ctx.font = '40px monospace';
+                ctx.fillText('Game Over', 80, canvas.height / 2 - 20);
+                ctx.font = '20px monospace';
+                ctx.fillText('Press R to Restart', 120, canvas.height / 2 + 20);
+            } else if (gameWon) {
+                ctx.fillStyle = 'green';
+                ctx.font = '40px monospace';
+                ctx.fillText('You Win!', 110, canvas.height / 2 - 20);
+                ctx.font = '20px monospace';
+                ctx.fillText('Press R to Restart', 120, canvas.height / 2 + 20);
+            }
+        }
+
+        function resetGame() {
+            cat.x = 150;
+            bird.x = Math.random() * (canvas.width - bird.width);
+            bird.y = -bird.height;
+            score = 0;
+            gameOver = false;
+            gameWon = false;
+        }
+
+        // Game loop
+        function gameLoop() {
+            update();
+            draw();
+            requestAnimationFrame(gameLoop);
+        }
+
+        // Start game when assets are loaded
+        Promise.all([
+            new Promise(resolve => catImg.onload = resolve),
+            new Promise(resolve => birdImg.onload = resolve)
+        ]).then(() => gameLoop());
+    </script>
+</body>
+</html>

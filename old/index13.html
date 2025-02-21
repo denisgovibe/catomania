@@ -1,0 +1,394 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Catomania</title>
+    <style>
+        canvas { border: 1px solid white; background: #000000; }
+        body { display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; font-family: monospace; background: #000000; }
+    </style>
+</head>
+<body>
+    <canvas id="gameCanvas" width="400" height="600"></canvas>
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+
+        // Load assets
+        const catImg = new Image(); catImg.src = 'cat.png';
+        const birdImg = new Image(); birdImg.src = 'bird.png';
+        const birdRedImg = new Image(); birdRedImg.src = 'birdred.png';
+        const titleImg = new Image(); titleImg.src = 'title.png';
+        const gameOverImg = new Image(); gameOverImg.src = 'gameover.png';
+        const heartImg = new Image(); heartImg.src = 'heart.png';
+        const winImg = new Image(); winImg.src = 'win.png';
+        const fishImg = new Image(); fishImg.src = 'fish.png';
+        const windImg = new Image(); windImg.src = 'wind.png'; // New wind indicator
+        const catchSound = new Audio('catch.wav');
+        const meowSound = new Audio('meow.mp3');
+        const heartSound = new Audio('heart.wav');
+        const gameOverSound = new Audio('gameover.wav');
+        const winSound = new Audio('win.mp3');
+
+        // Game variables
+        let cat = { x: 150, speed: 5, width: 100, height: 100 };
+        let birds = [];
+        let fish = null;
+        let score = 0;
+        let lives = 3;
+        let gameOver = false;
+        let gameWon = false;
+        let gameStarted = false;
+        let paused = false;
+        let redBirdCount = 0;
+        let baseBirdSpeed = 5;
+        const slowBirdSpeed = 2;
+        let currentBirdSpeed = baseBirdSpeed;
+        let fishSlowTimer = 0;
+        let minBirds = 2;
+        let maxBirds = 5;
+        let birdIncreaseCounter = 0;
+        const winScore = 100;
+        let windActive = false;
+        let windDirection = 0; // -1 (left), 1 (right), 0 (no wind)
+        let windTimer = 0;
+        let lastWindScore = 0; // Track when wind last triggered
+
+        // Input handling
+        let keys = { left: false, right: false };
+        document.addEventListener('keydown', (e) => {
+            if (!gameStarted && e.key !== ' ' && e.key !== 'p') {
+                gameStarted = true;
+                spawnBirds();
+            }
+            if (e.key === 'ArrowLeft') keys.left = true;
+            if (e.key === 'ArrowRight') keys.right = true;
+            if (e.key === 'r' && (gameOver || gameWon)) resetGame();
+            if ((e.key === ' ' || e.key === 'p') && gameStarted && !gameOver && !gameWon) {
+                paused = !paused;
+            }
+        });
+        document.addEventListener('keyup', (e) => {
+            if (e.key === 'ArrowLeft') keys.left = false;
+            if (e.key === 'ArrowRight') keys.right = false;
+        });
+
+        // Spawn birds with controlled spacing
+        function spawnBirds() {
+            birds = [];
+            const birdCount = Math.floor(Math.random() * (maxBirds - minBirds + 1)) + minBirds;
+            const spacing = canvas.width / (birdCount + 1);
+            for (let i = 0; i < birdCount; i++) {
+                birds.push({
+                    x: spacing * (i + 1) - 30,
+                    y: -60 - (i * 100),
+                    speed: currentBirdSpeed,
+                    width: 60,
+                    height: 60,
+                    isRed: false
+                });
+            }
+        }
+
+        // Spawn red bird (twice per game)
+        function spawnRedBird() {
+            if (redBirdCount < 2 && Math.random() < 0.05) {
+                redBirdCount++;
+                return {
+                    x: Math.random() * (canvas.width - 60),
+                    y: -60,
+                    speed: currentBirdSpeed,
+                    width: 60,
+                    height: 60,
+                    isRed: true
+                };
+            }
+            return null;
+        }
+
+        // Spawn fish (very rare)
+        function spawnFish() {
+            if (!fish && Math.random() < 0.001) {
+                fish = {
+                    x: Math.random() * (canvas.width - 50),
+                    y: -50,
+                    speed: 3,
+                    width: 50,
+                    height: 50
+                };
+            }
+        }
+
+        // Game logic
+        function update() {
+            if (!gameStarted || gameOver || gameWon || paused) return;
+
+            // Move cat
+            if (keys.left && cat.x > 0) cat.x -= cat.speed;
+            if (keys.right && cat.x < canvas.width - cat.width) cat.x += cat.speed;
+
+            // Increase bird speed gradually
+            baseBirdSpeed = 5 + (score / 20);
+
+            // Wind effect every 25 points
+            if (score >= lastWindScore + 25 && score < winScore) {
+                windActive = true;
+                windDirection = Math.random() < 0.5 ? -1 : 1; // Random left or right
+                windTimer = 5; // 5 seconds duration
+                lastWindScore = score - (score % 25); // Align to nearest 25
+            }
+            if (windActive) {
+                windTimer -= 1 / 60;
+                if (windTimer <= 0) windActive = false;
+            }
+
+            // Fish slow effect
+            if (fishSlowTimer > 0) {
+                fishSlowTimer -= 1 / 60;
+                currentBirdSpeed = slowBirdSpeed;
+            } else {
+                currentBirdSpeed = baseBirdSpeed;
+            }
+            birds.forEach(bird => bird.speed = currentBirdSpeed);
+
+            // Move and check birds
+            for (let i = birds.length - 1; i >= 0; i--) {
+                birds[i].y += birds[i].speed;
+                if (windActive) {
+                    birds[i].x += windDirection * 2; // Horizontal wind speed
+                    if (birds[i].x < 0) birds[i].x = 0; // Keep within bounds
+                    if (birds[i].x > canvas.width - birds[i].width) birds[i].x = canvas.width - birds[i].width;
+                }
+                if (birds[i].y > canvas.height) {
+                    lives--;
+                    heartSound.cloneNode().play().catch(() => console.log("heart.wav failed"));
+                    birds.splice(i, 1);
+                    const redBird = spawnRedBird();
+                    birds.push(redBird || {
+                        x: Math.random() * (canvas.width - 60),
+                        y: -60,
+                        speed: currentBirdSpeed,
+                        width: 60,
+                        height: 60,
+                        isRed: false
+                    });
+                    birdIncreaseCounter++;
+                    if (birdIncreaseCounter >= 10 && maxBirds < 8) {
+                        maxBirds++;
+                        birdIncreaseCounter = 0;
+                    }
+                    if (lives <= 0) {
+                        gameOver = true;
+                        gameOverSound.play().catch(() => console.log("gameover.wav failed"));
+                    }
+                    continue;
+                }
+
+                // Collision detection with cat
+                if (birds[i].y + birds[i].height > canvas.height - cat.height &&
+                    birds[i].x < cat.x + cat.width &&
+                    birds[i].x + birds[i].width > cat.x) {
+                    score++;
+                    catchSound.cloneNode().play().catch(() => console.log("catch.wav failed"));
+                    if (birds[i].isRed) {
+                        lives = Math.min(lives + 1, 5);
+                    }
+                    if (score % 10 === 0) {
+                        meowSound.cloneNode().play().catch(() => console.log("meow.mp3 failed"));
+                    }
+                    birds.splice(i, 1);
+                    const redBird = spawnRedBird();
+                    birds.push(redBird || {
+                        x: Math.random() * (canvas.width - 60),
+                        y: -60,
+                        speed: currentBirdSpeed,
+                        width: 60,
+                        height: 60,
+                        isRed: false
+                    });
+                    birdIncreaseCounter++;
+                    if (birdIncreaseCounter >= 10 && maxBirds < 8) {
+                        maxBirds++;
+                        birdIncreaseCounter = 0;
+                    }
+                    if (score >= winScore) {
+                        gameWon = true;
+                        winSound.play().catch(() => console.log("win.mp3 failed"));
+                    }
+                }
+            }
+
+            // Move and check fish
+            if (fish) {
+                fish.y += fish.speed;
+                if (fish.y > canvas.height) {
+                    fish = null;
+                } else if (fish.y + fish.height > canvas.height - cat.height &&
+                    fish.x < cat.x + cat.width &&
+                    fish.x + fish.width > cat.x) {
+                    fish = null;
+                    fishSlowTimer = 2.5;
+                }
+            }
+            spawnFish();
+        }
+
+        function draw() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            if (!gameStarted) {
+                if (titleImg.complete && titleImg.naturalWidth !== 0) {
+                    ctx.drawImage(titleImg, 50, canvas.height / 2 - 50, 300, 100);
+                } else {
+                    ctx.fillStyle = 'white';
+                    ctx.font = '40px monospace';
+                    ctx.fillText('Catomania', 80, canvas.height / 2 - 20);
+                }
+                ctx.fillStyle = 'white';
+                ctx.font = '16px monospace';
+                ctx.fillText('Press any key to start', 120, canvas.height - 50);
+                return;
+            }
+
+            // Draw cat
+            if (catImg.complete && catImg.naturalWidth !== 0) {
+                ctx.drawImage(catImg, cat.x, canvas.height - cat.height, cat.width, cat.height);
+            } else {
+                ctx.fillStyle = 'gray';
+                ctx.fillRect(cat.x, canvas.height - cat.height, cat.width, cat.height);
+            }
+
+            // Draw birds
+            if (!gameOver && !gameWon) {
+                birds.forEach(bird => {
+                    const img = bird.isRed ? birdRedImg : birdImg;
+                    if (img.complete && img.naturalWidth !== 0) {
+                        ctx.drawImage(img, bird.x, bird.y, bird.width, bird.height);
+                    } else {
+                        ctx.fillStyle = bird.isRed ? 'red' : 'yellow';
+                        ctx.fillRect(bird.x, bird.y, bird.width, bird.height);
+                    }
+                });
+            }
+
+            // Draw fish
+            if (fish && !gameOver && !gameWon) {
+                if (fishImg.complete && fishImg.naturalWidth !== 0) {
+                    ctx.drawImage(fishImg, fish.x, fish.y, fish.width, fish.height);
+                } else {
+                    ctx.fillStyle = 'blue';
+                    ctx.fillRect(fish.x, fish.y, fish.width, fish.height);
+                }
+            }
+
+            // Draw score
+            ctx.fillStyle = 'white';
+            ctx.font = '20px monospace';
+            ctx.fillText(`Score: ${score}`, 10, 40);
+
+            // Draw hearts
+            for (let i = 0; i < lives; i++) {
+                if (heartImg.complete && heartImg.naturalWidth !== 0) {
+                    ctx.drawImage(heartImg, canvas.width - 40 - (i * 40), 10, 30, 30);
+                } else {
+                    ctx.fillStyle = 'red';
+                    ctx.fillRect(canvas.width - 40 - (i * 40), 10, 30, 30);
+                }
+            }
+
+            // Draw progress bar
+            if (!gameOver && !gameWon) {
+                const progressWidth = (score / winScore) * (canvas.width - 20);
+                ctx.fillStyle = 'white';
+                ctx.fillRect(10, 50, progressWidth, 5);
+                ctx.strokeStyle = 'white';
+                ctx.strokeRect(10, 50, canvas.width - 20, 5);
+            }
+
+            // Draw wind indicator
+            if (windActive && windImg.complete && windImg.naturalWidth !== 0) {
+                ctx.save();
+                if (windDirection === -1) {
+                    ctx.scale(-1, 1); // Flip horizontally for left wind
+                    ctx.drawImage(windImg, -canvas.width / 2 - 25, 10, 50, 50);
+                } else {
+                    ctx.drawImage(windImg, canvas.width / 2 - 25, 10, 50, 50);
+                }
+                ctx.restore();
+            } else if (windActive) {
+                ctx.fillStyle = 'white';
+                ctx.font = '20px monospace';
+                ctx.fillText(windDirection === -1 ? '<-' : '->', canvas.width / 2 - 10, 30);
+            }
+
+            // Pause screen
+            if (paused) {
+                ctx.fillStyle = 'white';
+                ctx.font = '40px monospace';
+                ctx.fillText('Paused', 130, canvas.height / 2);
+                ctx.font = '20px monospace';
+                ctx.fillText('Press Space or P to Resume', 70, canvas.height / 2 + 40);
+                return;
+            }
+
+            // Game over or win
+            if (gameOver) {
+                if (gameOverImg.complete && gameOverImg.naturalWidth !== 0) {
+                    ctx.drawImage(gameOverImg, 50, canvas.height / 2 - 50, 300, 100);
+                } else {
+                    ctx.fillStyle = 'white';
+                    ctx.font = '40px monospace';
+                    ctx.fillText('Game Over', 80, canvas.height / 2 - 20);
+                }
+                ctx.fillStyle = 'white';
+                ctx.font = '16px monospace';
+                ctx.fillText('Press R to Restart', 140, canvas.height - 50);
+            } else if (gameWon) {
+                if (winImg.complete && winImg.naturalWidth !== 0) {
+                    ctx.drawImage(winImg, 50, canvas.height / 2 - 50, 300, 100);
+                } else {
+                    ctx.fillStyle = 'white';
+                    ctx.font = '40px monospace';
+                    ctx.fillText('You Win!', 110, canvas.height / 2 - 20);
+                }
+                ctx.fillStyle = 'white';
+                ctx.font = '16px monospace';
+                ctx.fillText('Press R to Restart', 140, canvas.height - 50);
+            }
+        }
+
+        function resetGame() {
+            cat.x = 150;
+            score = 0;
+            lives = 3;
+            gameOver = false;
+            gameWon = false;
+            gameStarted = true;
+            paused = false;
+            redBirdCount = 0;
+            minBirds = 2;
+            maxBirds = 5;
+            birdIncreaseCounter = 0;
+            fish = null;
+            fishSlowTimer = 0;
+            baseBirdSpeed = 5;
+            currentBirdSpeed = baseBirdSpeed;
+            windActive = false;
+            windDirection = 0;
+            windTimer = 0;
+            lastWindScore = 0;
+            spawnBirds();
+        }
+
+        // Game loop
+        function gameLoop() {
+            update();
+            draw();
+            requestAnimationFrame(gameLoop);
+        }
+
+        // Start game immediately
+        gameLoop();
+    </script>
+</body>
+</html>
