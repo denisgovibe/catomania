@@ -12,6 +12,7 @@ The game will start automatically after the logo screen. Enjoy!
 Note: Since this game was built using Grok 3, it may have some limitations or quirks. Please be gentle—it’s my first attempt at game development! 
 
 Technical Details
+
 Platform: Created with Grok 3 (no manual coding involved!).
 Environment: Runs only in web browsers.
 Skills Used: Zero programming knowledge—just creativity and the power of AI.
