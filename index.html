@@ -1,0 +1,421 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Catomania</title>
+    <style>
+        canvas { border: 1px solid white; background: #000000; }
+        body { display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; background: #000000; }
+        @font-face {
+            font-family: 'RetroGameFont';
+            src: url('retrogamefont.ttf') format('truetype');
+        }
+    </style>
+</head>
+<body>
+    <canvas id="gameCanvas" width="400" height="600"></canvas>
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+
+        // Assets
+        const assets = {
+            images: {
+                cat: new Image(), catShadow: new Image(), bird: new Image(), birdRed: new Image(),
+                title: new Image(), load: new Image(), heart: new Image(), fish: new Image(), wind: new Image()
+            },
+            sounds: {
+                catch: new Audio('catch.wav'), meow: new Audio('meow.mp3'), heart: new Audio('heart.wav'),
+                gameOver: new Audio('gameover.wav'), win: new Audio('win.mp3')
+            }
+        };
+        assets.images.cat.src = 'cat.png';
+        assets.images.catShadow.src = 'catshadow.png';
+        assets.images.bird.src = 'bird.png';
+        assets.images.birdRed.src = 'birdred.png';
+        assets.images.title.src = 'title.png';
+        assets.images.load.src = 'load.gif';
+        assets.images.heart.src = 'heart.png';
+        assets.images.fish.src = 'fish.png';
+        assets.images.wind.src = 'wind.png';
+
+        // Game state
+        const state = {
+            cat: { x: 150, speed: 5.5, width: 100, height: 100 }, // Speed increased by 10% (5 -> 5.5)
+            birds: [],
+            fish: null,
+            score: 0,
+            lives: 3,
+            missedBirds: 0,
+            gameOver: false,
+            gameWon: false,
+            gameStarted: false,
+            paused: false,
+            redBirdCount: 0,
+            baseBirdSpeed: 5.5, // Increased by 10% (5 -> 5.5)
+            slowBirdSpeed: 2.2, // Increased by 10% (2 -> 2.2)
+            currentBirdSpeed: 5.5,
+            fishSlowTimer: 0,
+            minBirds: 2,
+            maxBirds: 5,
+            birdIncreaseCounter: 0,
+            winScore: 100,
+            windActive: false,
+            windDirection: 0,
+            windTimer: 0,
+            lastWindScore: 0,
+            introTimer: 2,
+            titleTimer: 2,
+            restartDelay: 0,
+            textBlinkTimer: 0,
+            meowText: '',
+            meowTimer: 0,
+            progressPulse: 1,
+            shadowShake: 0,
+            dustParticles: [],
+            keys: { left: false, right: false }
+        };
+
+        // Timing optimization
+        let lastTime = performance.now();
+        const targetFPS = 60;
+        const frameTime = 1000 / targetFPS;
+
+        // Utility functions
+        const playSound = (sound) => sound.cloneNode().play().catch(() => console.log(`${sound.src} failed`));
+        const randomRange = (min, max) => Math.floor(Math.random() * (max - min + 1)) + min;
+        const clamp = (value, min, max) => Math.min(Math.max(value, min), max);
+
+        // Input handling
+        document.addEventListener('keydown', (e) => {
+            if (state.introTimer > 0 || state.titleTimer > 0 || state.restartDelay > 0) return;
+            if (e.key === 'ArrowLeft' || e.key === 'a' || e.key === 'ф') state.keys.left = true;
+            if (e.key === 'ArrowRight' || e.key === 'd' || e.key === 'в') state.keys.right = true;
+            if ((e.key === 'r' || e.key === 'к' || e.code === 'KeyR') && (state.gameOver || state.gameWon)) {
+                state.restartDelay = 0.5;
+            }
+            if ((e.key === ' ' || e.key === 'p' || e.key === 'з') && state.gameStarted && !state.gameOver && !state.gameWon) {
+                state.paused = !state.paused;
+            }
+        });
+        document.addEventListener('keyup', (e) => {
+            if (e.key === 'ArrowLeft' || e.key === 'a' || e.key === 'ф') state.keys.left = false;
+            if (e.key === 'ArrowRight' || e.key === 'd' || e.key === 'в') state.keys.right = false;
+        });
+
+        // Game object creation
+        function createBird(x, y, isRed = false) {
+            return { x, y, speed: state.currentBirdSpeed, width: 60, height: 60, isRed, rotation: 0 };
+        }
+
+        function spawnBirds() {
+            state.birds = [];
+            const birdCount = randomRange(state.minBirds, state.maxBirds);
+            const spacing = canvas.width / (birdCount + 1);
+            for (let i = 0; i < birdCount; i++) {
+                state.birds.push(createBird(spacing * (i + 1) - 30, -60 - (i * 100)));
+            }
+        }
+
+        function spawnRedBird() {
+            if (state.redBirdCount < 2 && Math.random() < 0.05) {
+                state.redBirdCount++;
+                return createBird(Math.random() * (canvas.width - 60), -60, true);
+            }
+            return null;
+        }
+
+        function spawnFish() {
+            if (!state.fish && Math.random() < 0.002) {
+                state.fish = { x: Math.random() * (canvas.width - 50), y: -50, speed: 3.3, width: 50, height: 50 }; // 10% increase (3 -> 3.3)
+            }
+        }
+
+        function spawnDust(deltaTime) {
+            if (state.windActive && Math.random() < 0.2) {
+                state.dustParticles.push({
+                    x: Math.random() * canvas.width,
+                    y: Math.random() * canvas.height,
+                    size: Math.random() * 2 + 1,
+                    dx: state.windDirection * (Math.random() * 2 + 1),
+                    dy: Math.random() * 1 - 0.5,
+                    life: 1
+                });
+            }
+            state.dustParticles.forEach(p => {
+                p.x += p.dx * deltaTime * targetFPS;
+                p.y += p.dy * deltaTime * targetFPS;
+                p.life -= deltaTime;
+                if (p.life <= 0 || p.x < 0 || p.x > canvas.width) state.dustParticles.splice(state.dustParticles.indexOf(p), 1);
+            });
+        }
+
+        // Update logic
+        function updateBirds(deltaTime) {
+            for (let i = state.birds.length - 1; i >= 0; i--) {
+                const bird = state.birds[i];
+                bird.y += bird.speed * deltaTime * targetFPS;
+                if (state.windActive) {
+                    bird.x += state.windDirection * 2 * deltaTime * targetFPS;
+                    bird.x = clamp(bird.x, 0, canvas.width - bird.width);
+                }
+                if (bird.y > canvas.height) {
+                    state.lives--;
+                    state.missedBirds++;
+                    playSound(assets.sounds.heart);
+                    state.birds.splice(i, 1);
+                    const redBird = spawnRedBird();
+                    state.birds.push(redBird || createBird(Math.random() * (canvas.width - 60), -60));
+                    state.birdIncreaseCounter++;
+                    if (state.birdIncreaseCounter >= 10 && state.maxBirds < 8) {
+                        state.maxBirds++;
+                        state.birdIncreaseCounter = 0;
+                    }
+                    if (state.lives <= 0) {
+                        state.gameOver = true;
+                        playSound(assets.sounds.gameOver);
+                    }
+                    continue;
+                }
+
+                if (bird.y + bird.height > canvas.height - state.cat.height &&
+                    bird.x < state.cat.x + state.cat.width &&
+                    bird.x + bird.width > state.cat.x) {
+                    state.score++;
+                    playSound(assets.sounds.catch);
+                    if (bird.isRed) state.lives = Math.min(state.lives + 1, 5);
+                    if (state.score % 10 === 0) playSound(assets.sounds.meow);
+                    if (state.score % 25 === 0 && state.score < state.winScore && state.meowTimer === 0) {
+                        const phrases = ['Meow!', 'Purr!', 'Catch!', 'Wow!'];
+                        state.meowText = phrases[Math.floor(Math.random() * phrases.length)];
+                        state.meowTimer = 2;
+                    }
+                    state.birds.splice(i, 1);
+                    const redBird = spawnRedBird();
+                    state.birds.push(redBird || createBird(Math.random() * (canvas.width - 60), -60));
+                    state.birdIncreaseCounter++;
+                    if (state.birdIncreaseCounter >= 10 && state.maxBirds < 8) {
+                        state.maxBirds++;
+                        state.birdIncreaseCounter = 0;
+                    }
+                    if (state.score >= state.winScore) {
+                        state.gameWon = true;
+                        playSound(assets.sounds.win);
+                    }
+                }
+            }
+        }
+
+        function updateFish(deltaTime) {
+            if (state.fish) {
+                state.fish.y += state.fish.speed * deltaTime * targetFPS;
+                if (state.fish.y > canvas.height) {
+                    state.fish = null;
+                } else if (state.fish.y + state.fish.height > canvas.height - state.cat.height &&
+                    state.fish.x < state.cat.x + state.cat.width &&
+                    state.fish.x + state.fish.width > state.cat.x) {
+                    state.fish = null;
+                    state.fishSlowTimer = 1.5;
+                }
+            }
+        }
+
+        function update(deltaTime) {
+            if (state.introTimer > 0) {
+                state.introTimer -= deltaTime;
+                return;
+            }
+            if (state.titleTimer > 0) {
+                state.titleTimer -= deltaTime;
+                if (state.titleTimer <= 0) {
+                    state.gameStarted = true;
+                    spawnBirds();
+                }
+                return;
+            }
+            if (state.restartDelay > 0) {
+                state.restartDelay -= deltaTime;
+                if (state.restartDelay <= 0) resetGame();
+                return;
+            }
+            if (!state.gameStarted || state.gameOver || state.gameWon || state.paused) return;
+
+            if (state.keys.left && state.cat.x > 0) state.cat.x -= state.cat.speed * deltaTime * targetFPS;
+            if (state.keys.right && state.cat.x < canvas.width - state.cat.width) state.cat.x += state.cat.speed * deltaTime * targetFPS;
+
+            state.baseBirdSpeed = 5.5 + (state.score / 20);
+            state.currentBirdSpeed = state.fishSlowTimer > 0 ? state.slowBirdSpeed : state.baseBirdSpeed;
+            state.fishSlowTimer = Math.max(state.fishSlowTimer - deltaTime, 0);
+            state.birds.forEach(bird => {
+                bird.speed = state.currentBirdSpeed;
+                bird.rotation = state.windActive ? state.windDirection * 5 : 0;
+            });
+
+            if (!state.windActive && Math.random() < 0.01) {
+                state.windActive = true;
+                state.windDirection = Math.random() < 0.5 ? -1 : 1;
+                state.windTimer = 5;
+            }
+            if (state.score >= state.lastWindScore + 25 && state.score < state.winScore) {
+                state.windActive = true;
+                state.windDirection = Math.random() < 0.5 ? -1 : 1;
+                state.windTimer = 5;
+                state.lastWindScore = state.score - (state.score % 25);
+            }
+            if (state.windActive) {
+                state.windTimer -= deltaTime;
+                if (state.windTimer <= 0) state.windActive = false;
+                state.shadowShake = Math.sin(Date.now() * 0.02) * 2;
+            } else {
+                state.shadowShake = 0;
+            }
+
+            updateBirds(deltaTime);
+            updateFish(deltaTime);
+            spawnFish();
+            spawnDust(deltaTime);
+
+            state.textBlinkTimer += deltaTime;
+            if (state.meowTimer > 0) state.meowTimer -= deltaTime;
+            if (state.score >= 90) state.progressPulse = 1 + Math.sin(Date.now() * 0.005) * 0.1;
+        }
+
+        // Render logic
+        function drawImage(img, x, y, width, height, rotation = 0) {
+            if (img.complete && img.naturalWidth !== 0) {
+                if (rotation) {
+                    ctx.save();
+                    ctx.translate(x + width / 2, y + height / 2);
+                    ctx.rotate(rotation * Math.PI / 180);
+                    ctx.drawImage(img, -width / 2, -height / 2, width, height);
+                    ctx.restore();
+                } else {
+                    ctx.drawImage(img, x, y, width, height);
+                }
+            } else {
+                ctx.fillStyle = 'gray';
+                ctx.fillRect(x, y, width, height);
+            }
+        }
+
+        function drawText(text, x, y, fontSize, color = 'white', align = 'left', alpha = 1) {
+            ctx.fillStyle = `rgba(255, 255, 255, ${alpha})`;
+            ctx.font = `${fontSize}px RetroGameFont`;
+            ctx.textAlign = align;
+            ctx.fillText(text, x, y);
+        }
+
+        function draw() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            // Screen noise
+            for (let i = 0; i < 200; i++) {
+                ctx.fillStyle = `rgba(255, 255, 255, ${Math.random() * 0.2})`;
+                ctx.fillRect(Math.random() * canvas.width, Math.random() * canvas.height, 1, 1);
+            }
+
+            // Intro screen (Screen 1)
+            if (state.introTimer > 0) {
+                drawText('Double Go Games', canvas.width / 2, canvas.height / 2 - 10, 16, 'white', 'center');
+                drawText('present', canvas.width / 2, canvas.height / 2 + 10, 16, 'white', 'center');
+                return;
+            }
+
+            // Title screen (Screen 2)
+            if (state.titleTimer > 0) {
+                drawImage(assets.images.title, 50, canvas.height / 2 - 50, 300, 100);
+                drawImage(assets.images.load, canvas.width / 2 - 50, canvas.height / 2 + 60, 100, 100 / (assets.images.load.naturalWidth / assets.images.load.naturalHeight));
+                return;
+            }
+
+            // Game rendering
+            const shadowWidth = state.windActive ? state.cat.width + state.windDirection * 10 : state.cat.width;
+            drawImage(assets.images.catShadow, state.cat.x + state.shadowShake, canvas.height - 50, shadowWidth, 50);
+            drawImage(assets.images.cat, state.cat.x, canvas.height - state.cat.height, state.cat.width, state.cat.height);
+
+            if (!state.gameOver && !state.gameWon) {
+                state.birds.forEach(bird => drawImage(bird.isRed ? assets.images.birdRed : assets.images.bird, bird.x, bird.y, bird.width, bird.height, bird.rotation));
+                if (state.fish) drawImage(assets.images.fish, state.fish.x, state.fish.y, state.fish.width, state.fish.height);
+            }
+
+            state.dustParticles.forEach(p => {
+                ctx.fillStyle = `rgba(150, 150, 150, ${p.life})`;
+                ctx.fillRect(p.x, p.y, p.size, p.size);
+            });
+
+            drawText(`Score: ${state.score}`, 10, 40, 20);
+            for (let i = 0; i < state.lives; i++) {
+                drawImage(assets.images.heart, canvas.width - 40 - (i * 40), 10, 30, 30);
+            }
+
+            if (!state.gameOver && !state.gameWon) {
+                const baseProgressWidth = Math.min((state.score / state.winScore) * (canvas.width - 20), canvas.width - 20);
+                const progressWidth = Math.min(baseProgressWidth * state.progressPulse, canvas.width - 20);
+                ctx.fillStyle = 'white';
+                ctx.fillRect(10, 50, progressWidth, 5);
+                ctx.strokeStyle = 'white';
+                ctx.strokeRect(10, 50, canvas.width - 20, 5);
+            }
+
+            if (state.windActive) drawImage(assets.images.wind, canvas.width / 2 - 12, 60, 24, 24, state.windDirection === 1 ? 180 : 0);
+            if (state.meowTimer > 0) drawText(state.meowText, state.cat.x + state.cat.width / 2, canvas.height - state.cat.height - 10, 16, 'white', 'center');
+
+            if (state.paused) {
+                drawText('Paused', canvas.width / 2, canvas.height / 2, 30, 'white', 'center');
+                drawText('Press Space or P to Resume', canvas.width / 2, canvas.height / 2 + 30, 16, 'white', 'center');
+            } else if (state.gameOver) {
+                drawText('Game Over', canvas.width / 2, canvas.height / 2 - 20, 40, 'white', 'center');
+                drawText('Press R to Restart', canvas.width / 2, canvas.height - 40, 16, 'white', 'center', Math.abs(Math.sin(state.textBlinkTimer * 2)));
+                drawText(`Missed: ${state.missedBirds}`, canvas.width / 2, canvas.height - 60, 16, 'white', 'center');
+            } else if (state.gameWon) {
+                drawText('You Win!', canvas.width / 2, canvas.height / 2 - 20, 40, 'white', 'center');
+                drawText('Press R to Restart', canvas.width / 2, canvas.height - 40, 16, 'white', 'center', Math.abs(Math.sin(state.textBlinkTimer * 2)));
+                drawText(`Missed: ${state.missedBirds}`, canvas.width / 2, canvas.height - 60, 16, 'white', 'center');
+            }
+        }
+
+        function resetGame() {
+            Object.assign(state, {
+                cat: { x: 150, speed: 5.5, width: 100, height: 100 },
+                birds: [],
+                fish: null,
+                score: 0,
+                lives: 3,
+                missedBirds: 0,
+                gameOver: false,
+                gameWon: false,
+                gameStarted: true,
+                paused: false,
+                redBirdCount: 0,
+                baseBirdSpeed: 5.5,
+                currentBirdSpeed: 5.5,
+                fishSlowTimer: 0,
+                minBirds: 2,
+                maxBirds: 5,
+                birdIncreaseCounter: 0,
+                windActive: false,
+                windDirection: 0,
+                windTimer: 0,
+                lastWindScore: 0,
+                meowTimer: 0,
+                meowText: '',
+                progressPulse: 1,
+                shadowShake: 0,
+                dustParticles: []
+            });
+            spawnBirds();
+        }
+
+        function gameLoop(currentTime) {
+            const deltaTime = Math.min((currentTime - lastTime) / 1000, 0.1); // Cap at 0.1s to avoid large jumps
+            lastTime = currentTime;
+
+            update(deltaTime);
+            draw();
+            requestAnimationFrame(gameLoop);
+        }
+
+        requestAnimationFrame(gameLoop);
+    </script>
+</body>
+</html>
