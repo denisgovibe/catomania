@@ -1,4 +1,5 @@
 Catomania
+
 Hello! Welcome to Catomania , a browser-based game created by someone who has absolutely no programming knowledge whatsoever.
 
 About the Game
